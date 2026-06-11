@@ -1,15 +1,21 @@
 """
 db.py - definicja schematu bazy NBP i silnika SQLAlchemy.
 
-Zmiany względem v1:
-  - currencies: PK zmieniony na (code, table_type), bo ta sama waluta
-    może być w tabeli A i C jednocześnie (mid vs bid/ask).
-  - exchange_rates: FK rozszerzony o table_type → (currency_code, table_type).
+Schemat:
+  - currencies: PK złożony (code, table_type) — ta sama waluta może być
+    w tabeli A i C jednocześnie (mid vs bid/ask).
+  - exchange_rates: przechowuje table_type jawnie, FK na (currency_code, table_type).
+
+Indeksy w exchange_rates:
+  - (table_type, rate_date) — główny filtr dashboardu: zakres dat w obrębie tabeli
+  - (currency_code)         — pomocniczy, przy filtrowaniu po pojedynczej walucie
+  Nie używamy indeksu złożonego z currency_code w środku, bo zapytania filtrują
+  po currency_code = ANY(:lista), co uniemożliwia efektywne użycie indeksu złożonego.
 """
 
 from sqlalchemy import (
     create_engine, MetaData, Table, Column,
-    String, Integer, BigInteger, Date, Numeric, Text,
+    String, BigInteger, Date, Numeric, Text,
     ForeignKeyConstraint, UniqueConstraint, Index,
 )
 
@@ -28,7 +34,6 @@ metadata = MetaData()
 
 currencies = Table(
     "currencies", metadata,
-    # PK złożony: ta sama waluta może być w tabeli A i C
     Column("code", String(3), nullable=False),
     Column("name", Text, nullable=False),
     Column("table_type", String(1), nullable=False),
@@ -39,7 +44,6 @@ exchange_rates = Table(
     "exchange_rates", metadata,
     Column("id", BigInteger, primary_key=True, autoincrement=True),
     Column("currency_code", String(3), nullable=False),
-    # przechowujemy table_type jawnie — potrzebne do FK i filtrowania
     Column("table_type", String(1), nullable=False),
     Column("rate_date", Date, nullable=False),
     Column("mid", Numeric(12, 6)),
@@ -51,17 +55,18 @@ exchange_rates = Table(
         ["currencies.code", "currencies.table_type"],
         name="fk_rates_currency",
     ),
-    UniqueConstraint("currency_code", "table_type", "rate_date", "table_no",
-                     name="uq_rate"),
-    Index("idx_rates_date", "rate_date"),
+    UniqueConstraint(
+        "currency_code", "table_type", "rate_date", "table_no",
+        name="uq_rate",
+    ),
+    Index("idx_rates_table_date", "table_type", "rate_date"),
     Index("idx_rates_curr", "currency_code"),
-    Index("idx_rates_table_type", "table_type"),
 )
 
 
 def init_db():
     metadata.create_all(engine)
-    print("Schemat utworzony (lub juz istnial).")
+    print("Schemat utworzony (lub już istniał).")
 
 
 if __name__ == "__main__":
